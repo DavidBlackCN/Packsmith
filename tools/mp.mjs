@@ -1,10 +1,12 @@
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { printReview, printSelection } from './lib/command-output.mjs';
 import { bootstrap } from './lib/pakku.mjs';
 import { loadWorkspace, selectTarget } from './lib/workspace.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const help = `Packsmith
+  pnpm menu                    打开本地维护菜单
   pnpm bootstrap               安装并校验固定版本的 Pakku
   pnpm targets                 列出已注册的 Target
   pnpm intake "<游戏目录>" [--world <存档目录名>]  离线采集实例候选
@@ -66,25 +68,7 @@ async function main(args) {
     const { applyPrepared, prepareSelection } = await import('./lib/apply.mjs');
     const preparing = command === 'preview';
     const result = preparing ? await prepareSelection(root, target, values.feature) : await applyPrepared(root, target, values.prepared);
-    console.log(`${target.id} · ${result.plan.features.map(feature => feature.title).join('、')}`);
-    const fileSides = new Map(result.plan.features.flatMap(feature => feature.operations)
-      .filter(op => op.type === 'file').map(op => [op.destination, { common: '两端', client: '客户端', server: '服务端' }[op.side]]));
-    for (const change of result.plan.changes) {
-      const action = change.before === null ? '新增' : change.after === null ? '移除' : '修改';
-      const side = fileSides.get(change.path);
-      console.log(`${action}  ${target.path}/${change.path}${side ? '  ' + side : ''}`);
-    }
-    for (const change of result.plan.dependencies.changes) {
-      const release = endpoint => endpoint ? `${endpoint.side} ${endpoint.files.map(file => `${file.platform}/${file.fileId} (${file.fileName})`).join('、')}` : '无';
-      const action = { add: '新增', update: '更新', remove: '移除' }[change.kind];
-      console.log(`${action}${change.direct ? '所选' : '连带'}依赖  ${change.name}  ${release(change.before)} → ${release(change.after)}`);
-    }
-    if (!result.plan.changes.length) console.log('所选功能已与 Target 一致。');
-    if (preparing) {
-      console.log(`差异：${path.join(result.directory, 'changes.diff')}\n预览编号：${result.id}`);
-    } else if (result.out) {
-      console.log(`${result.alreadyApplied ? '已存在相同改动' : '已写入'}，检查与构建通过。产物：${result.out}`);
-    }
+    printSelection(target, result, preparing);
     return;
   }
   if (command === 'review') {
@@ -95,14 +79,7 @@ async function main(args) {
     }
     const { reviewIntake } = await import('./lib/review.mjs');
     const review = await reviewIntake(root, target, { offline: values.offline });
-    const mods = review.items.filter(item => item.kind === 'mod');
-    const locked = mods.filter(item => item.comparison.status === 'locked').length;
-    const exact = mods.filter(item => Object.values(item.platforms ?? {}).some(match => match.status === 'exact')).length;
-    console.log(`${target.id} 共对照 ${mods.length} 条 JAR 路径，${locked} 条命中锁文件，${exact} 条获得平台精确匹配。发现 ${review.conflicts.length} 组同 ID、同版本但内容不同的声明。`);
-    for (const platform of ['modrinth', 'curseforge']) {
-      const failures = new Set(mods.map(item => item.platforms?.[platform]).filter(match => match?.status === 'error').map(match => match.reason));
-      if (failures.size) console.log(`${platform} 查询未完成：${[...failures].join('，')}。`);
-    }
+    printReview(target, review);
     console.log('证据见 .intake/current/review.json。可以告诉 Codex 想保留哪个功能。');
     return;
   }
@@ -114,6 +91,7 @@ async function main(args) {
   }
   const { build } = await import('./lib/build.mjs');
   const { out, report } = await build(root, target);
+  for (const artifact of report.artifacts) console.log('  ' + artifact.name);
   console.log(`${target.id} 已构建 ${report.artifacts.length} 份产物，输出目录 ${out}`);
 }
 

@@ -9,6 +9,7 @@
   },
   "scripts": {
     "mp": "node tools/mp.mjs",
+    "menu": "node tools/menu.mjs",
     "bootstrap": "node tools/mp.mjs bootstrap",
     "targets": "node tools/mp.mjs targets",
     "intake": "node tools/mp.mjs intake",
