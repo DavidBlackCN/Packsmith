@@ -17,8 +17,17 @@ importers:
       yauzl:
         specifier: 3.4.0
         version: 3.4.0
+    devDependencies:
+      czg:
+        specifier: 1.14.0
+        version: 1.14.0
 
 packages:
+
+  czg@1.14.0:
+    resolution: {integrity: sha512-pO0VNReAHu6TSArr655pYRyShn6n2MX2ohMIz/jIugbI2UkeqSGp46zIOsYKORi9l1WNcdkbCiLKc8lolCr2Tw==}
+    engines: {node: '>=v12.20.0'}
+    hasBin: true
 
   fflate@0.8.2:
     resolution: {integrity: sha512-cPJU47OaAoCbg0pBvzsgpTPhmhqI5eJjh/JIu8tPj5q+T7iLvW/JAYUqmE7KOB4R1ZyEhzBaIQpQpardBF5z8A==}
@@ -35,6 +44,8 @@ packages:
     engines: {node: '>=12'}
 
 snapshots:
+
+  czg@1.14.0: {}
 
   fflate@0.8.2: {}
 

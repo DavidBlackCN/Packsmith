@@ -131,6 +131,19 @@ pnpm build --target fabric-lite
 
 只有一个 Target 时会自动选中。多个 Target 共存时，也可以在 `workspace.json` 顶层设置 `"defaultTarget": "fabric-1.21.1"`，将它作为省略参数时的默认值。
 
+## 可选的提交助手
+
+可以照常用 `git commit` 或编辑器提交。想用 Gitmoji 和 Conventional Commits 时，把要提交的文件暂存好，再运行 `pnpm commit`。选一个类型，按需填写范围，写一句改动说明，确认后提交。
+
+| 类型 | 什么时候用 | 提交示例 |
+| --- | --- | --- |
+| `feat` | 增减玩法内容或调整平衡 | `✨ feat(KubeJS): 保留 KubeJS 的压板配方` |
+| `fix` | 修复已有内容的问题 | `🐛 fix(fabric-1.21.1): 修复服务端启动崩溃` |
+| `chore` | 例行升级 Mod、调整包版本或维护工具 | `🔧 chore: 升级 Sodium 到 0.6.13` |
+| `docs` | 修改安装说明、指南或更新日志 | `📝 docs: 补充服务端安装步骤` |
+
+范围可以留空，也可以写配方、Mod 名或 Target ID。每个项目都可以在 [cz.config.cjs](cz.config.cjs) 调整菜单和表情。CI 按文件改动选择 Target，发布仍由 Git 标签触发。
+
 ## 从 GitHub Actions 下载预览包
 
 把整合包改动提交并推送到任意开发分支。在仓库的 **Actions → CI** 打开这次 push 对应的运行，在 **Artifacts** 下载 `preview-<Target ID>`。解开下载的 ZIP 后，把里面的 `.mrpack` 导入启动器。附件还包含该 Target 声明的其他产物、`build-report.json` 和 `SHA256SUMS`，预览保留 14 天。
