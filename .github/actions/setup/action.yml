@@ -1,0 +1,39 @@
+name: Set up Packsmith
+description: Install the template's pinned tools and dependencies
+inputs:
+  pakku:
+    description: Install Java and verify the Pakku JAR
+    required: false
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - id: versions
+      shell: bash
+      run: |
+        node <<'NODE'
+        const fs = require('node:fs');
+        const { node, java } = require('./toolchain.json');
+        // Earlier v3 tags recorded only the supported Java major and a tested build.
+        const versions = { node, distribution: java.distribution ?? 'temurin', java: java.version ?? java.major };
+        for (const [key, value] of Object.entries(versions)) {
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, key + '=' + value + '\n');
+        }
+        NODE
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      with:
+        node-version: ${{ steps.versions.outputs.node }}
+        package-manager-cache: false
+    - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+      with:
+        cache: true
+    - shell: bash
+      run: pnpm install --frozen-lockfile
+    - if: inputs.pakku == 'true'
+      uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6
+      with:
+        distribution: ${{ steps.versions.outputs.distribution }}
+        java-version: ${{ steps.versions.outputs.java }}
+    - if: inputs.pakku == 'true'
+      shell: bash
+      run: pnpm bootstrap

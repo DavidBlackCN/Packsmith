@@ -1,0 +1,111 @@
+name: Draft Release
+on:
+  push:
+    tags: ['**']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing trusted Git tag (exact spelling)
+        required: true
+        type: string
+      target:
+        description: Target ID in that tag's workspace.json
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || !github.event.deleted
+    runs-on: ubuntu-24.04
+    outputs:
+      publish: ${{ steps.select.outputs.publish }}
+      target: ${{ steps.select.outputs.target }}
+      commit: ${{ steps.select.outputs.commit }}
+      tag_key: ${{ steps.select.outputs.tag_key }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Check out the tagged project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Get the release tools from this workflow's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .work/release-tools
+          persist-credentials: false
+      - id: select
+        env:
+          TARGET_ID: ${{ inputs.target }}
+        run: node .work/release-tools/tools/release.mjs select
+      - if: steps.select.outputs.publish == 'true'
+        uses: ./.work/release-tools/.github/actions/setup
+      - id: build
+        if: steps.select.outputs.publish == 'true'
+        env:
+          TARGET_ID: ${{ steps.select.outputs.target }}
+          EXPECTED_COMMIT: ${{ steps.select.outputs.commit }}
+          CURSEFORGE_API_KEY: ${{ ((github.event_name == 'push' && github.ref_protected) || (github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) && secrets.CURSEFORGE_API_KEY || '' }}
+        run: node .work/release-tools/tools/ci.mjs build
+      - if: steps.select.outputs.publish == 'true'
+        env:
+          TARGET_ID: ${{ steps.select.outputs.target }}
+          EXPECTED_COMMIT: ${{ steps.select.outputs.commit }}
+          RELEASE_DIRECTORY: ${{ steps.build.outputs.output }}
+        run: node .work/release-tools/tools/release.mjs verify
+      - id: upload
+        if: steps.select.outputs.publish == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-bundle-${{ github.run_attempt }}
+          path: ${{ steps.build.outputs.output }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  draft:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    concurrency:
+      group: packsmith-release-${{ needs.build.outputs.tag_key }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the release tools from this workflow's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          pakku: 'false'
+      - name: Read the tagged project at the built commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.build.outputs.commit }}
+          fetch-depth: 0
+          path: .work/release-source
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          merge-multiple: true
+          path: .work/release-bundle
+      - name: Verify the bundle and create the draft
+        env:
+          RELEASE_SOURCE: .work/release-source
+          RELEASE_DIRECTORY: .work/release-bundle
+          TARGET_ID: ${{ inputs.target }}
+          EXPECTED_COMMIT: ${{ needs.build.outputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/release.mjs draft

@@ -1,0 +1,9 @@
+{
+  "targets": [
+    {
+      "id": "fabric-1.21.1",
+      "path": "packs/fabric-1.21.1",
+      "artifacts": ["modrinth", "serverpack"]
+    }
+  ]
+}
