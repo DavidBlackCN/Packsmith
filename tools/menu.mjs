@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pkg from '../package.json' with { type: 'json' };
 import { bootstrap, requireSuccess, run, tool, verifiedTool } from './lib/pakku.mjs';
+import { printBootstrap } from './lib/command-output.mjs';
 import { loadWorkspace, readJson, selectTarget } from './lib/workspace.mjs';
 import { isCI, multiline, terminal } from './lib/terminal.mjs';
 import { homeActions } from './menu-home.mjs';
@@ -15,14 +16,15 @@ async function mp(root, args) {
 
 async function collect(root, ui) {
   // Windows Explorer copies a file path with surrounding double quotes.
-  const directory = (await ui.ask('游戏目录（直接包含 mods、config 或 kubejs 的那一层，留空返回）'))
+  const directory = (await ui.ask('游戏目录', { section: 'INTAKE', context: '选择直接包含 mods、config 或 kubejs 的那一层目录' }))
     .replace(/^"(.*)"$/u, '$1');
   if (!directory) return;
   const args = ['intake'];
-  const includeWorld = await ui.confirm('同时采集指定存档中的数据包？');
+  const includeWorld = await ui.confirm('同时采集指定存档中的数据包？', { section: 'INTAKE', context: directory,
+    noLabel: '否，只采集游戏目录', yesLabel: '是，指定存档' });
   if (includeWorld === null) return;
   if (includeWorld) {
-    const world = await ui.ask('存档目录名（saves 下的文件夹名，留空返回）');
+    const world = await ui.ask('存档目录名', { section: 'INTAKE', context: '输入该实例 saves 下的文件夹名' });
     if (!world) return;
     args.push('--world=' + world);
   }
@@ -35,9 +37,9 @@ async function ensurePakku(root, ui) {
     await fs.access(spec.jar);
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
-    if (!await ui.confirm(`需要 Pakku ${spec.version}。现在下载并校验吗？`)) return false;
-    ui.write(`正在下载并校验 Pakku ${spec.version}…`);
-    await bootstrap(root);
+    if (!await ui.confirm(`下载并校验 Pakku ${spec.version}？`, { section: 'BOOTSTRAP', facts: [['缓存', spec.jar]] })) return false;
+    ui.status('progress', `正在下载并校验 Pakku ${spec.version}…`);
+    printBootstrap(await bootstrap(root), ui.write);
     return true;
   }
   await verifiedTool(root);
@@ -48,9 +50,10 @@ async function commitStaged(root, ui) {
   const diff = requireSuccess(await run('git', ['-c', 'core.quotePath=false', 'diff', '--cached', '--stat', '--'],
     { cwd: root, capture: true }));
   if (!diff.stdout.trim()) {
-    ui.write('暂存区为空。请先在编辑器中暂存，或用 git add 选择要提交的改动。');
+    ui.status('info', '暂存区为空。请先在编辑器中暂存，或用 git add 选择要提交的改动。');
     return;
   }
+  ui.status('info', '提交助手将处理以下暂存改动');
   ui.write(multiline(diff.stdout.trimEnd()));
   const packageFile = createRequire(path.join(root, 'package.json')).resolve('czg/package.json');
   const { bin } = await readJson(packageFile);
@@ -63,6 +66,7 @@ async function commitStaged(root, ui) {
     delete env.FORCE_COLOR;
   }
   await ui.suspend(async () => requireSuccess(await run(process.execPath, [entry], { cwd: root, env })));
+  ui.status('info', '已从提交助手返回。');
 }
 
 export async function runMenu(root, ui) {
@@ -87,10 +91,14 @@ export async function runMenu(root, ui) {
       current = selectTarget(workspace, preferred);
       return current;
     }
-    const index = await ui.choose('选择 Target', workspace.targets.map(target => {
+    const labels = workspace.targets.map(target => {
       const suffix = target.id === current?.id ? '（当前）' : target.id === workspace.defaultTarget ? '（默认）' : '';
       return target.id + suffix;
-    }));
+    });
+    const details = workspace.targets.map(target => ({ detail: target.path, meta: ['产物  ' + target.artifacts.join(', ')] }));
+    const index = await ui.choose('选择 Target', labels, {
+      section: 'SELECT TARGET', context: path.basename(root), descriptions: details,
+    });
     if (index === null) return null;
     current = workspace.targets[index];
     return current;
@@ -100,8 +108,9 @@ export async function runMenu(root, ui) {
     const actions = multiple ? homeActions : homeActions.slice(0, 4);
     const labels = actions.map(action => action.label);
     const details = actions.map(action => action.detail);
-    const choice = await ui.choose('Packsmith', labels, '退出', details, {
-      workspace: path.basename(root), version: pkg.version, target: current?.id ?? '待选择',
+    const choice = await ui.choose('Packsmith', labels, {
+      backLabel: '退出', descriptions: details,
+      home: { workspace: path.basename(root), version: pkg.version, target: current?.id ?? '待选择' },
     });
     if (choice === null) return;
     try {
@@ -119,7 +128,9 @@ export async function runMenu(root, ui) {
           const { reviewFromMenu } = await import('./menu-review.mjs');
           await reviewFromMenu(root, target, ui, prepareTool);
         } else {
-          const action = await ui.choose(`检查与构建 · ${target.id}`, ['检查当前 Target', '构建当前 Target']);
+          const action = await ui.choose(`检查与构建 · ${target.id}`, ['检查当前 Target', '构建当前 Target'], {
+            section: 'CHECK & BUILD', context: target.path, descriptions: ['校验配置、锁文件和覆盖资源', '运行检查，构建并校验整合包'],
+          });
           if (action === null || !await prepareTool()) continue;
           await mp(root, [action === 0 ? 'check' : 'build', '--target', target.id]);
         }

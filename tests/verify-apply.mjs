@@ -71,14 +71,21 @@ export async function verifyApprovedFeature(root, target, other) {
       assert.match(choices[0], /使用已有审查/);
       return 0;
     },
-    chooseMany: (_, labels) => {
+    chooseMany: (_, labels, { descriptions }) => {
       const index = labels.findIndex(label => label.includes('[recipe]'));
       assert.notEqual(index, -1);
+      assert.equal(descriptions[index].meta[0], '文件操作 1 项 · 依赖操作 1 项');
+      assert.ok(descriptions[index].meta.some(line => line.includes(recipe)));
+      assert.ok(descriptions[index].meta.some(line => line.includes('移除依赖') && line.includes(retired)));
       return [index];
     },
-    async confirm() {
+    async confirm(_, { facts }) {
       const menuId = /预览编号：([a-f0-9]{64})/.exec(menu.join('\n'))?.[1];
       assert.ok(menuId);
+      const summary = Object.fromEntries(facts);
+      assert.equal(summary.预览编号, menuId);
+      assert.equal(summary.文件变更, '新增 1 · 修改 1 · 移除 0');
+      assert.equal(summary.依赖变更, '直接 1 · 连带 0');
       assert.equal(await fs.readFile(path.join(root, '.work/prepared', menuId, 'changes.diff'), 'utf8'), diff);
       return true;
     },

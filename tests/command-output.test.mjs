@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  printBootstrap, printBuild, printCheck, printIntake, printReview, printSelection, printTargets,
+  approvalFacts, printBootstrap, printBuild, printCheck, printIntake, printReview, printSelection, printTargets,
 } from '../tools/lib/command-output.mjs';
 import { intakeKinds } from '../tools/lib/intake.mjs';
 
@@ -97,4 +97,17 @@ test('Targets 区分显式默认、唯一可选和需要 --target，Check 统计
   const tool = render(write => printBootstrap({ version: '1.5.0', jar: '.cache/pakku-1.5.0.jar' }, write));
   assert.match(tool, /1\.5\.0 的 SHA-256 校验通过/);
   assert.ok(tool.includes('.cache/pakku-1.5.0.jar'));
+});
+
+test('批准摘要按实际变更和连带依赖汇总，不用提案操作数估计', () => {
+  const id = 'a'.repeat(64);
+  const plan = {
+    features: [{ title: '配方' }],
+    changes: [{ before: null, after: 'a' }, { before: 'b', after: 'c' }, { before: 'd', after: null }],
+    dependencies: { changes: [{ direct: true }, { direct: false }, { direct: false }] },
+  };
+  assert.deepEqual(Object.fromEntries(approvalFacts(target, { plan, id })), {
+    Target: 'fabric', 写入目录: 'packs/fabric', 预览编号: id, 所选功能: '1 项',
+    文件变更: '新增 1 · 修改 1 · 移除 1', 依赖变更: '直接 1 · 连带 2',
+  });
 });

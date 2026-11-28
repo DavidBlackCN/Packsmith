@@ -23,6 +23,8 @@ export function terminal(stream = process.stdout, env = process.env) {
   const paint = (code, text) => color ? `\x1b[${code}m${text}\x1b[0m` : text;
   return {
     heading: text => paint('1;36', text),
+    info: text => paint(36, (interactive ? '· ' : '[info] ') + text),
+    progress: text => paint(36, (interactive ? '… ' : '[work] ') + text),
     ok: text => paint(32, (interactive ? '✓ ' : '[ok] ') + text),
     warn: text => paint(33, (interactive ? '! ' : '[warn] ') + text),
     fail: text => paint(31, (interactive ? '× ' : '[fail] ') + text),

@@ -1,4 +1,5 @@
 import { field } from './lib/terminal.mjs';
+import { layout, width } from './menu-components.mjs';
 
 export const homeActions = [
   { group: 'WORKFLOW', icon: '↓', name: 'Collect Instance', label: '从实例采集', detail: '扫描 Mod、配置、脚本和资源',
@@ -13,62 +14,10 @@ export const homeActions = [
     source: 'workspace.json 中的 Target', result: '切换本次菜单使用的 Target' },
 ];
 
-const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-
-// Terminal cell widths, with ambiguous symbols narrow (the usual VT setting).
-function cells(cluster) {
-  if (/^[\p{Mark}\p{Cf}]+$/u.test(cluster)) return 0;
-  if (/\p{Emoji_Presentation}|\uFE0F|\u20E3/u.test(cluster)) return 2;
-  const n = cluster.codePointAt(0);
-  return n >= 0x1100 && (n <= 0x115f || n === 0x2329 || n === 0x232a ||
-    (n >= 0x2e80 && n <= 0xa4cf && n !== 0x303f) || (n >= 0xa960 && n <= 0xa97f) ||
-    (n >= 0xac00 && n <= 0xd7a3) || (n >= 0xf900 && n <= 0xfaff) ||
-    (n >= 0xfe10 && n <= 0xfe19) || (n >= 0xfe30 && n <= 0xfe6f) ||
-    (n >= 0xff01 && n <= 0xff60) || (n >= 0xffe0 && n <= 0xffe6) ||
-    (n >= 0x1b000 && n <= 0x1b2ff) || (n >= 0x20000 && n <= 0x3fffd)) ? 2 : 1;
-}
-
-function width(text) {
-  let count = 0;
-  for (const { segment } of graphemes.segment(text)) count += cells(segment);
-  return count;
-}
-
-function clip(text, limit, ellipsis = '…') {
-  if (limit <= 0) return '';
-  let count = 0, result = '', prefix = '';
-  const stop = limit - width(ellipsis);
-  for (const { segment } of graphemes.segment(text)) {
-    count += cells(segment);
-    if (count > limit) return prefix + (stop >= 0 ? ellipsis : '');
-    result += segment;
-    if (count <= stop) prefix = result;
-  }
-  return result;
-}
-
-function pad(text, length) {
-  return text + ' '.repeat(Math.max(0, length - width(text)));
-}
-
 export function renderHome({ version = '', workspace = '', target = '', options = [], active = 0,
   filter = '', columns = 80, rows = 24, color = false, ascii = false }) {
-  // Reserve the terminal's last column for readline's wrap handling.
-  const margin = columns < 36 ? ' ' : '  ';
-  const area = Math.max(1, columns - margin.length - 1);
-  const wide = columns >= 80;
-  const compact = rows < 18;
-  const navWidth = wide ? Math.min(48, Math.floor(area * 0.39)) : area;
-  const gutter = '    ';
-  const asideWidth = area - navWidth - gutter.length;
-  const shorten = (text, limit = area) => clip(text, limit, ascii ? '..' : '…');
-  const paint = (code, text) => color && !ascii && text ? '\x1b[' + code + 'm' + text + '\x1b[0m' : text;
-  const accent = text => paint('1;36', text);
-  const strong = text => paint('1', text);
-  const dim = text => paint('90', text);
-  const rule = dim((ascii ? '-' : '─').repeat(area));
-  const line = text => margin + text;
-  const leftRight = (left, leftCells, right) => left + ' '.repeat(Math.max(0, navWidth - leftCells)) + gutter + right;
+  const { area, wide, compact, navWidth, asideWidth, shorten, accent, strong, dim, leftRight,
+    choice, shortcuts, frame } = layout({ columns, rows, color, ascii });
   const pixel = ascii ? ['###.', '#_#\'', '#   '] : ['▟██▙', '██▄▛', '██  '];
   const ver = field(version);
   const stamp = ver && (ver.startsWith('v') ? ver : 'v' + ver);
@@ -83,25 +32,10 @@ export function renderHome({ version = '', workspace = '', target = '', options 
     accent(pixel[1]) + '   ' + meta('Workspace', workspace, area - 7),
     accent(pixel[2]) + '   ' + meta('Target   ', target, area - 7),
   ];
-  const footer = [];
   const keys = ascii ? [['数字 + Enter', '选择'], ['0 / Ctrl+C', '退出']] : !options.length ?
     [['/关键词 + Enter', '重新筛选'], ['/ + Enter', '清除'], ['Esc / 0 / Ctrl+C', '退出']] :
     [['↑↓', '移动'], ['Enter', '选择'], ['数字 + Enter', '直达'], ['/关键词 + Enter', '筛选'], ['Esc / 0 / Ctrl+C', '退出']];
-  let hints = '', hintWidth = 0;
-  for (const [key, verb] of keys) {
-    const label = color && !ascii ? ' ' + key + ' ' : '[' + key + ']';
-    const plain = shorten(label + ' ' + verb);
-    const tokenWidth = width(plain);
-    if (hints && hintWidth + 3 + tokenWidth > area) {
-      footer.push(hints);
-      hints = '';
-      hintWidth = 0;
-    }
-    const token = plain === label + ' ' + verb ? paint('38;5;252;48;5;238', label) + ' ' + verb : plain;
-    hints += (hints ? '   ' : '') + token;
-    hintWidth += (hintWidth ? 3 : 0) + tokenWidth;
-  }
-  footer.push(hints, dim(shorten('命令帮助  pnpm mp help')));
+  const footer = [...shortcuts(keys), dim(shorten('命令帮助  pnpm mp help'))];
 
   const selection = options[active];
   const selectedAction = selection && homeActions[selection.index];
@@ -141,15 +75,10 @@ export function renderHome({ version = '', workspace = '', target = '', options 
       previous = action.group;
     }
     const current = selection === option;
-    const number = String(option.index + 1);
-    const marker = ascii ? '  ' + number + '.  ' : current ? '▌ [' + number + ']  ' : '   ' + number + '   ';
     const symbol = ascii ? '' : action.icon + '  ';
     const summary = field(option.detail ?? '');
-    const label = marker + symbol + field(option.text);
-    const entry = shorten(ascii && compact && !wide && summary ? label + '  ' + summary : label, navWidth);
-    const bar = current && !ascii ? pad(entry, navWidth) : entry;
-    add(current ? paint('1;38;5;16;48;5;80', bar) : bar, bar, current,
-      ascii && wide ? shorten(summary, asideWidth) : '');
+    const label = symbol + field(option.text) + (ascii && compact && !wide && summary ? '  ' + summary : '');
+    nav.push({ ...choice(option.index, label, current, navWidth), summary: ascii && wide ? shorten(summary, asideWidth) : '' });
     if (ascii && !wide && !compact && summary) add('     ' + shorten(summary, navWidth - 5));
     if (!wide && current && details && !ascii) {
       const inline = compact ? details.slice(0, 1) : details;
@@ -180,9 +109,5 @@ export function renderHome({ version = '', workspace = '', target = '', options 
     if (size() > budget) header.length = 0;
     if (size() > budget) footer.length = 0;
   }
-  const base = size();
-  const extra = rows - 1 - base;
-  return [...header, ...(extra >= 1 ? [rule] : []), ...(extra >= 4 ? [''] : []),
-    ...panel, ...(extra >= 3 ? [''] : []), ...(extra >= 2 ? [rule] : []), ...footer]
-    .map(text => text ? line(text) : '').join('\n');
+  return frame(header, panel, footer);
 }

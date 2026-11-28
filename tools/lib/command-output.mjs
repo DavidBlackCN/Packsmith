@@ -94,6 +94,23 @@ function describeRelease(endpoint) {
   return field(endpoint.side) + ' ' + files.join('、');
 }
 
+const fileAction = change => change.before === null ? '新增' : change.after === null ? '移除' : '修改';
+
+export function approvalFacts(target, preview) {
+  const { changes, dependencies, features } = preview.plan;
+  const files = countBy(changes, fileAction);
+  const deps = dependencies.changes;
+  const direct = deps.filter(change => change.direct).length;
+  return [
+    ['Target', field(target.id)],
+    ['写入目录', field(target.path)],
+    ['预览编号', field(preview.id)],
+    ['所选功能', features.length + ' 项'],
+    ['文件变更', ['新增', '修改', '移除'].map(action => action + ' ' + (files.get(action) ?? 0)).join(' · ')],
+    ['依赖变更', '直接 ' + direct + ' · 连带 ' + (deps.length - direct)],
+  ];
+}
+
 export function printSelection(target, result, preparing, write = console.log, preparedId = result.id) {
   const style = heading(preparing ? 'PREVIEW' : 'APPLY', write, target);
   const { features, changes, dependencies } = result.plan;
@@ -104,7 +121,7 @@ export function printSelection(target, result, preparing, write = console.log, p
     .filter(op => op.type === 'file').map(op => [op.destination, sides[op.side]]));
   write('文件变更：' + changes.length);
   for (const change of changes) {
-    const action = change.before === null ? '新增' : change.after === null ? '移除' : '修改';
+    const action = fileAction(change);
     const side = fileSides.get(change.path) ?? '工程元数据';
     write('  ' + action + '  ' + side + '  ' + field(target.path + '/' + change.path));
   }

@@ -12,10 +12,14 @@ test('输出按各自的 TTY 着色，NO_COLOR 保留文字和状态符号', () 
   const tty = { isTTY: true };
   const ansi = /\x1b\[/;
   assert.match(terminal(tty, {}).heading('检查'), ansi);
+  assert.match(terminal(tty, {}).progress('生成预览'), /\x1b\[36m… 生成预览/);
+  assert.equal(terminal(tty, { NO_COLOR: '1' }).info('已有审查'), '· 已有审查');
   assert.equal(terminal(tty, { NO_COLOR: '1' }).ok('完成'), '✓ 完成');
   assert.equal(terminal({}, {}).ok('完成'), '[ok] 完成');
   for (const env of [{ TERM: 'dumb' }, { CI: 'true' }]) {
     const ui = terminal(tty, env);
+    assert.equal(ui.info('已有审查'), '[info] 已有审查');
+    assert.equal(ui.progress('生成预览'), '[work] 生成预览');
     assert.equal(ui.warn('请先采集'), '[warn] 请先采集');
     assert.equal(ui.fail('构建失败'), '[fail] 构建失败');
     assert.doesNotMatch(ui.muted('产物'), ansi);

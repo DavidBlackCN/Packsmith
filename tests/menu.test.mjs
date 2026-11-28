@@ -19,7 +19,7 @@ test('多 Target 菜单记住当前选择，取消切换后仍使用原目标', 
   const homeTargets = [];
   const actions = ['检查与构建', 'neo', null, '切换 Target', null, '检查与构建', null, '切换 Target', 'fabric', null];
   await runMenu(root, {
-    choose(title, labels, back, details, home) {
+    choose(title, labels, { home } = {}) {
       prompts.push(title);
       if (home) {
         assert.equal(home.workspace, path.basename(root));
@@ -63,19 +63,40 @@ test('离线审查只预览勾选项，拒绝应用保留原文件，也不会�
     id, title: ['难度调整', '视觉设置'][index],
     operations: [{ type: 'file', side: 'common', path: 'config/' + id, destination: 'config/' + id }],
   }));
+  features[1].description = '调整\n视觉效果';
   const proposal = path.join(root, '.intake', 'current', 'proposal.json');
   const save = targetId => fs.writeFile(proposal, JSON.stringify({ schema: 1, scanId, target: targetId, features }));
   await save(target.id);
 
   const output = [];
+  const states = [];
   const ui = {
     write: line => output.push(line),
-    choose: (_, labels) => labels.findIndex(label => label.startsWith('离线审查')),
-    chooseMany(_, labels) {
+    status: (kind, message) => { states.push(kind); output.push(message); },
+    choose(_, labels, { section, context }) {
+      assert.equal(section, 'REVIEW MODE');
+      assert.ok(context.includes(target.id) && context.includes(scanId));
+      return labels.findIndex(label => label.startsWith('离线审查'));
+    },
+    chooseMany(_, labels, { descriptions, section, context }) {
+      assert.equal(section, 'FEATURE SELECTION');
+      assert.match(context, /fabric.*离线审查/);
       assert.match(labels[1], /视觉设置/);
+      assert.deepEqual(descriptions[1], {
+        detail: '调整\\x0a视觉效果', meta: ['文件操作 1 项 · 依赖操作 0 项', '公共文件  config/visual.json'],
+      });
       return [1];
     },
-    confirm() {
+    confirm(_, { section, facts, noLabel, yesLabel, warning }) {
+      assert.equal(section, 'APPLY');
+      const data = Object.fromEntries(facts);
+      assert.equal(data.Target, 'fabric');
+      assert.equal(data.写入目录, target.path);
+      assert.equal(data.所选功能, '1 项');
+      assert.equal(data.预览编号, /预览编号：([a-f0-9]{64})/.exec(output.join('\n'))[1]);
+      assert.equal(data.文件变更, '新增 0 · 修改 1 · 移除 0');
+      assert.equal(data.依赖变更, '直接 0 · 连带 0');
+      assert.ok(noLabel.includes('否') && yesLabel.includes('是') && warning.includes('写入'));
       const diff = output.find(line => line.startsWith('diff --git'));
       assert.match(diff, /visual\.json/);
       assert.doesNotMatch(diff, /difficulty\.json/);
@@ -84,6 +105,8 @@ test('离线审查只预览勾选项，拒绝应用保留原文件，也不会�
   };
   const noInstall = () => assert.fail('纯文件预览不需要 Pakku');
   await reviewFromMenu(root, target, ui, noInstall);
+  assert.deepEqual(states, ['progress', 'progress']);
+  assert.deepEqual(JSON.parse(await fs.readFile(proposal, 'utf8')).features, features);
   assert.ok(output.some(line => line.startsWith('diff --git')), '应展示实际差异');
   for (const file of files) assert.equal(await fs.readFile(path.join(pack, 'config', file), 'utf8'), '{"level":1}\n');
 

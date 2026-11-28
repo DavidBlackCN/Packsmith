@@ -38,7 +38,7 @@ function homeTerminal(t) {
     buffer = '';
     return raw ? snapshot : stripVTControlCharacters(snapshot);
   }
-  const open = () => ui.choose('Packsmith', labels, '退出', descriptions, home);
+  const open = () => ui.choose('Packsmith', labels, { backLabel: '退出', descriptions, home });
   const listeners = () => [input.listenerCount('keypress'), output.listenerCount('resize')];
   return { ui, input, output, frame, takeOutput, open, listeners };
 }
