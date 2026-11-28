@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bootstrap, requireSuccess, run, tool, verifiedTool } from './lib/pakku.mjs';
 import { loadWorkspace, readJson, selectTarget } from './lib/workspace.mjs';
+import { field, isCI, multiline, terminal } from './lib/terminal.mjs';
 import { createMenuUi, MenuCancelled } from './menu-ui.mjs';
 
 async function mp(root, args) {
@@ -16,7 +17,9 @@ async function collect(root, ui) {
     .replace(/^"(.*)"$/u, '$1');
   if (!directory) return;
   const args = ['intake'];
-  if (await ui.confirm('同时采集指定存档中的数据包？')) {
+  const includeWorld = await ui.confirm('同时采集指定存档中的数据包？');
+  if (includeWorld === null) return;
+  if (includeWorld) {
     const world = await ui.ask('存档目录名（saves 下的文件夹名，留空返回）');
     if (!world) return;
     args.push('--world=' + world);
@@ -46,16 +49,32 @@ async function commitStaged(root, ui) {
     ui.write('暂存区为空。请先在编辑器中暂存，或用 git add 选择要提交的改动。');
     return;
   }
-  ui.write(diff.stdout.trimEnd());
+  ui.write(multiline(diff.stdout.trimEnd()));
   const packageFile = createRequire(path.join(root, 'package.json')).resolve('czg/package.json');
   const { bin } = await readJson(packageFile);
   const entry = path.resolve(path.dirname(packageFile), bin.czg);
-  await ui.suspend(async () => requireSuccess(await run(process.execPath, [entry], { cwd: root })));
+  // czg bundles two renderers. One checks TERM, the other checks NO_COLOR and
+  // treats even FORCE_COLOR=0 as an explicit request to turn colors on.
+  let env = process.env;
+  if (env.NO_COLOR !== undefined || env.TERM === 'dumb') {
+    env = { ...env, NO_COLOR: '1', TERM: 'dumb' };
+    delete env.FORCE_COLOR;
+  }
+  await ui.suspend(async () => requireSuccess(await run(process.execPath, [entry], { cwd: root, env })));
 }
 
 export async function runMenu(root, ui) {
   let current;
   let multiple = false;
+  // Intake and Git are still available when the Target configuration needs repair.
+  const reportError = ui.error ?? ui.write;
+  try {
+    const workspace = await loadWorkspace(root);
+    multiple = workspace.targets.length > 1;
+    if (!multiple || workspace.defaultTarget) current = selectTarget(workspace, workspace.defaultTarget);
+  } catch (error) {
+    reportError(error.message);
+  }
 
   async function chooseTarget(switching = false) {
     const workspace = await loadWorkspace(root);
@@ -77,8 +96,13 @@ export async function runMenu(root, ui) {
 
   for (;;) {
     const labels = ['从实例采集', '审查与应用', '检查与构建', '提交已暂存的改动'];
-    if (multiple) labels.push('切换 Target');
-    const choice = await ui.choose(`Packsmith  ·  Target：${current?.id ?? '按需选择'}`, labels, '退出');
+    const details = ['扫描游戏目录，记录候选文件', '对照候选，预览并确认选中的功能',
+      '校验 Target 或导出整合包', '使用 czg 提交 Git 暂存区'];
+    if (multiple) {
+      labels.push('切换 Target');
+      details.push('选择本次审查或构建的整合包');
+    }
+    const choice = await ui.choose(`Packsmith · ${field(path.basename(root))} · Target：${current?.id ?? '待选择'}`, labels, '退出', details);
     if (choice === null) return;
     try {
       if (choice === 0) {
@@ -102,29 +126,33 @@ export async function runMenu(root, ui) {
       }
     } catch (error) {
       if (error instanceof MenuCancelled) throw error;
-      ui.write(error.message);
+      reportError(error.message);
     }
   }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = path.resolve(import.meta.dirname, '..');
-  const ui = createMenuUi();
-  try {
-    await runMenu(root, ui);
-  } catch (error) {
-    if (!(error instanceof MenuCancelled)) {
-      console.error(error.message);
-      process.exitCode = 1;
+  if (isCI() || !process.stdin.isTTY || !process.stdout.isTTY) {
+    console.error(terminal(process.stderr).fail('菜单需要交互式终端。运行 pnpm mp help 查看直接命令。'));
+    process.exitCode = 1;
+  } else {
+    const ui = createMenuUi();
+    try {
+      await runMenu(root, ui);
+    } catch (error) {
+      if (!(error instanceof MenuCancelled)) {
+        ui.error(error.message);
+        process.exitCode = 1;
+      }
+    } finally {
+      ui.close();
     }
-  } finally {
-    ui.close();
-  }
-  if (process.platform === 'win32' && process.stdin.isTTY && process.stdout.isTTY) {
-    // A Windows console read can outlive readline after czg returns to the menu.
-    // Flush the terminal output before ending the standalone CLI.
-    await Promise.all([process.stdout, process.stderr].map(stream =>
-      new Promise(resolve => stream.write('', resolve))));
-    process.exit(process.exitCode ?? 0);
+    if (process.platform === 'win32') {
+      // A Windows console read can outlive readline after czg returns to the menu.
+      await Promise.all([process.stdout, process.stderr].map(stream =>
+        new Promise(resolve => stream.write('', resolve))));
+      process.exit(process.exitCode ?? 0);
+    }
   }
 }

@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { printReview, printSelection } from './lib/command-output.mjs';
+import { printBootstrap, printBuild, printCheck, printIntake, printReview, printSelection, printTargets } from './lib/command-output.mjs';
 import { bootstrap } from './lib/pakku.mjs';
+import { field, multiline, terminal } from './lib/terminal.mjs';
 import { loadWorkspace, selectTarget } from './lib/workspace.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -41,34 +42,36 @@ async function main(args) {
     return;
   }
   if (command === 'bootstrap') {
-    const tool = await bootstrap(root);
-    console.log(`Pakku ${tool.version}  ${tool.jar}`);
+    console.log(terminal().muted('正在核验 Pakku，缺少本地缓存时会下载。'));
+    printBootstrap(await bootstrap(root));
     return;
   }
   if (isIntake) {
     if (positionals.length !== 1 || !positionals[0]) throw new Error('用法：pnpm intake "<游戏目录>" [--world <存档目录名>]');
-    const { runIntake } = await import('./lib/intake.mjs');
-    console.log('采集成功后会替换 .intake/current/ 中的上次结果。');
-    const { stats } = await runIntake(root, positionals[0], { world: values.world });
-    console.log(`采集完成，已计算 ${stats.filesHashed} 份文件的哈希，保存 ${stats.snapshots} 份文本快照。见 .intake/current/report.md`);
+    const { intakeKinds, runIntake } = await import('./lib/intake.mjs');
+    console.log(terminal().warn('采集成功后会替换 .intake/current/ 中的上次结果。'));
+    printIntake(await runIntake(root, positionals[0], { world: values.world }), intakeKinds);
     return;
   }
   if (!hasTarget && command !== 'targets') {
-    throw new Error(`未知命令 ${command}。运行 pnpm mp help 查看用法。`);
+    throw new Error(`未知命令 ${field(command)}。运行 pnpm mp help 查看用法。`);
   }
+  const selection = command === 'preview' || command === 'apply' ? await import('./lib/apply.mjs') : null;
+  if (command === 'preview') selection.requireFeatureIds(values.feature);
   const workspace = await loadWorkspace(root);
   if (command === 'targets') {
-    for (const target of workspace.targets) {
-      console.log(`${target.id}  ${target.path}`);
-    }
+    printTargets(workspace);
     return;
   }
   const target = selectTarget(workspace, values.target);
-  if (command === 'preview' || command === 'apply') {
-    const { applyPrepared, prepareSelection } = await import('./lib/apply.mjs');
+  if (selection) {
     const preparing = command === 'preview';
-    const result = preparing ? await prepareSelection(root, target, values.feature) : await applyPrepared(root, target, values.prepared);
-    printSelection(target, result, preparing);
+    if (preparing && values.feature?.length) console.log(terminal().muted('正在 ' + field(target.id) + ' 的临时副本中准备预览。'));
+    if (!preparing && values.prepared) {
+      console.log(terminal().muted('正在处理 Target ' + field(target.id) + ' 的已批准预览 ' + field(values.prepared)));
+    }
+    const result = preparing ? await selection.prepareSelection(root, target, values.feature) : await selection.applyPrepared(root, target, values.prepared);
+    printSelection(target, result, preparing, console.log, preparing ? result.id : values.prepared);
     return;
   }
   if (command === 'review') {
@@ -78,26 +81,25 @@ async function main(args) {
       return;
     }
     const { reviewIntake } = await import('./lib/review.mjs');
+    console.log(terminal().muted('正在对照当前采集与 Target ' + field(target.id) + '。'));
     const review = await reviewIntake(root, target, { offline: values.offline });
     printReview(target, review);
-    console.log('证据见 .intake/current/review.json。可以告诉 Codex 想保留哪个功能。');
+    console.log('下一步：告诉 AI 助手（如 Codex、DSH）想保留哪个功能，或编写 .intake/current/proposal.json。');
     return;
   }
   if (command === 'check') {
     const { checkTarget } = await import('./lib/check.mjs');
-    const { mapping } = await checkTarget(root, target);
-    console.log(`${target.id} 检查通过，包含 ${mapping.length} 个覆盖文件。`);
+    printCheck(target, await checkTarget(root, target));
     return;
   }
   const { build } = await import('./lib/build.mjs');
-  const { out, report } = await build(root, target);
-  for (const artifact of report.artifacts) console.log('  ' + artifact.name);
-  console.log(`${target.id} 已构建 ${report.artifacts.length} 份产物，输出目录 ${out}`);
+  console.log(terminal().muted('正在构建 Target ' + field(target.id) + '。'));
+  printBuild(target, await build(root, target));
 }
 
 try {
   await main(process.argv.slice(2));
 } catch (error) {
-  console.error(error.message);
+  console.error(terminal(process.stderr).fail(multiline(error.message)));
   process.exitCode = error.exitCode || 1;
 }

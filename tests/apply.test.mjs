@@ -64,3 +64,19 @@ test('改写预览或审查后加入新侧别均不能覆盖正式文件', async
   await assert.rejects(apply(next.id), /侧别在审查后已变化/);
   assert.equal(await read(dest), before);
 });
+
+test('首次写入和重复应用后构建失败，分别报告写入状态、构建原因及重试命令', async t => {
+  const { preview, apply, put, dest, read, content } = await fixture(t);
+  await put('toolchain.json', await fs.readFile(new URL('../toolchain.json', import.meta.url)));
+  const prepared = await preview('1');
+  for (const state of [/已写入 packs\/pack，构建失败/, /packs\/pack 已包含批准的改动，重新构建失败/]) {
+    await assert.rejects(apply(prepared.id), error => {
+      assert.match(error.message, state);
+      assert.match(error.message, /Pakku 未安装/);
+      assert.match(error.message, /pnpm build --target pack/);
+      assert.ok(error.message.includes(path.join(prepared.directory, 'changes.diff')));
+      return true;
+    });
+    assert.equal(await read(dest), content);
+  }
+});

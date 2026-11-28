@@ -18,14 +18,20 @@ pnpm build
 
 ## 本地维护菜单
 
-在仓库根目录运行 `pnpm install --frozen-lockfile` 安装依赖，然后用 `pnpm menu` 打开中文菜单。Windows、macOS 和 Linux 的入口相同。输入操作前的编号，`0` 返回，主菜单中输入 `0` 退出。
+在仓库根目录运行 `pnpm install --frozen-lockfile`，然后用 `pnpm menu` 打开中文菜单。Windows、macOS 和 Linux 使用同一个入口。`pnpm mp` 或 `pnpm mp --help` 可以随时查看直接命令。
+
+用 ↑、↓ 移动，Enter 选择。在功能列表中按空格勾选，输入 `/关键词` 再按 Enter 可筛选，单独输入 `/` 并回车可清除筛选。也可以直接输入编号，多选时用逗号或空格分隔。
+
+在选项和确认提示里，`0` 或 Esc 返回；在主菜单则退出。输入路径时可留空返回。写入确认默认选“否”，直接回车即可放弃这次写入。Ctrl+C 退出菜单。`TERM=dumb` 下使用编号和回车。
 
 - 选**从实例采集**，粘贴启动器中这个实例的游戏目录。需要采集世界数据包时再填存档目录名。采集可以离线运行，无需先安装 Java 或 Pakku。
-- 选**审查与应用**，在线查询 Mod 来源，或离线对照。已有功能提案时，按名称选择要保留的项目。菜单展示实际文件差异和连带依赖，确认后才写入并构建。如果还没有提案，可以请 Codex 根据审查结果整理，或[手写提案](#把选中的功能写入-target)。
+- 选**审查与应用**，在线查询 Mod 来源，或离线对照。有提案时，勾选要保留的功能，核对目标、实际文件差异和连带依赖，再决定是否写入并构建。首次审查后可以请 AI 助手整理提案，也可以[手写提案](#把选中的功能写入-target)。
 - **检查与构建**可以只检查包源，也可以直接构建。首次需要 Pakku 时菜单会提示安装，构建完成后列出产物位置。
 - 先在 Git 或编辑器中暂存文件，再选**提交已暂存的改动**打开[提交助手](#可选的提交助手)。
 
 采集与 Target 无关。审查和构建会自动使用唯一或默认的 Target。有多个且未设默认时，菜单会让你选择，本次会话内可以切换。各项操作也可以使用下面的独立命令。
+
+在 CI、管道或重定向输出时，直接运行 `pnpm targets`、`pnpm check` 或所需的其他命令。这些命令只用参数接收输入。`pnpm menu` 需要交互式终端，在上述环境会提示用法并退出。终端支持颜色时，设置 `NO_COLOR=1` 可关闭着色。CI、重定向和 `TERM=dumb` 使用纯文本状态标记，例如 `[ok]` 和 `[fail]`。
 
 ## 从开发实例采集
 
@@ -68,11 +74,13 @@ pnpm review --target fabric-1.21.1
 pnpm review --file "kubejs/server_scripts/press.js" --target fabric-1.21.1
 ```
 
-接着可以直接对 Codex 说 **“保留这次测试的配方，先给我方案。”** 提案会列出配方用到的 Mod、Target 已满足的依赖、脚本应放的位置和需要确认的问题。这个阶段只写本地审查结果，正式整合包由维护者决定如何修改。[维护工作流](.agents/skills/modpack-maintainer/SKILL.md)
+要在脚本里读取结果，用 `pnpm --silent review --file "<游戏相对路径>"` 获取 JSON。这会省去 pnpm 自身的脚本启动提示。
+
+接着可以告诉 AI 助手（例如 Codex 或 DSH）**“保留这次测试的配方，先给我方案。”** 如果助手没有自动发现项目里的维护说明，可以让它先读下面的维护工作流。提案会列出配方用到的 Mod、Target 已满足的依赖、脚本应放的位置和需要确认的问题。[维护工作流](.agents/skills/modpack-maintainer/SKILL.md)
 
 ## 把选中的功能写入 Target
 
-告诉 Codex **“只保留压板配方，地图设置先放着。”** 它会把功能清单记在 `.intake/current/proposal.json`，然后只为所选功能生成差异。你也可以手写这份文件。例如，下面的提案将一份 KubeJS 配方放进公共覆盖目录。把 `scanId` 换成当前 `manifest.json` 中的值，路径换成这次采集的实际文件。
+告诉助手 **“只保留压板配方，地图设置先放着。”** 它会把功能清单记在 `.intake/current/proposal.json`，然后只为所选功能生成差异。你也可以手写这份文件。例如，下面的提案将一份 KubeJS 配方放进公共覆盖目录。把 `scanId` 换成当前 `manifest.json` 中的值，路径换成这次采集的实际文件。
 
 ```json
 {
@@ -98,7 +106,7 @@ pnpm review --file "kubejs/server_scripts/press.js" --target fabric-1.21.1
 pnpm preview --feature plate --target fabric-1.21.1
 ```
 
-核对后，将预览编号交给 Codex，或运行下面的命令。写入前会重新核对所选实例文件和正式文件。若源实例改变，重新采集并审查；若是 Target 改变，重新对照并预览。写入完成后自动检查并构建所选 Target，终端会给出产物目录。
+核对后，将完整的预览编号交给助手，或运行下面的命令。写入前会重新核对所选实例文件和正式文件。若源实例改变，重新采集并审查；若是 Target 改变，重新对照并预览。写入完成后自动检查并构建所选 Target，终端会给出产物目录。
 
 ```powershell
 pnpm apply --prepared "刚才输出的完整预览编号" --target fabric-1.21.1
@@ -141,6 +149,15 @@ pnpm build --target fabric-lite
 ```
 
 只有一个 Target 时会自动选中。多个 Target 共存时，也可以在 `workspace.json` 顶层设置 `"defaultTarget": "fabric-1.21.1"`，将它作为省略参数时的默认值。
+
+示例模板运行 `pnpm --silent targets` 时，会列出可以构建的格式。窄终端或重定向到文件时也使用这个布局。
+
+```text
+PACKSMITH / TARGETS
+fabric-1.21.1  （唯一 Target，自动选中）
+  工程：packs/fabric-1.21.1
+  产物：modrinth, serverpack
+```
 
 ## 可选的提交助手
 

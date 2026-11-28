@@ -83,6 +83,24 @@ async function fixture(t) {
   return { project, game, primary, alternate, cli, current };
 }
 
+test('空工程的 preview 和 review --file 提示所缺输入，退出时保留简短的诊断', async t => {
+  const { cli, project, primary, alternate } = await fixture(t);
+  await put(project, 'workspace.json', json({ targets: [primary, alternate] }));
+  for (const [args, expected] of [
+    [['preview'], /--feature <id>/],
+    [['preview', '--feature', 'plate', '--target', primary.id], /pnpm intake.*pnpm review/],
+    [['review', '--file', config, '--target', primary.id], /pnpm intake.*pnpm review/],
+  ]) {
+    await assert.rejects(cli(...args), error => {
+      assert.equal(error.code, 1);
+      assert.match(error.stderr, expected);
+      assert.doesNotMatch(error.stderr, /node:internal|ENOENT/);
+      if (args[0] === 'review') assert.equal(error.stdout, '');
+      return true;
+    });
+  }
+});
+
 test('离线 CLI 逐 Target 对照：同声明异内容单列、精确命中 Pakku、同一采集保留重复路径', async t => {
   const { project, game, primary, alternate, cli, current } = await fixture(t);
   const beforeGame = await tree(game), beforePacks = await tree(path.join(project, 'packs'));

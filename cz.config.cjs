@@ -8,6 +8,7 @@ module.exports = {
   ],
   useEmoji: true,
   emojiAlign: 'left',
+  confirmColorize: process.env.NO_COLOR === undefined && process.env.TERM !== 'dumb',
   messages: {
     type: '这次改动属于哪一类？',
     customScope: '改了哪部分？可填配方、Mod 名或 Target ID，回车跳过',

@@ -7,34 +7,33 @@ import { publishChanges } from './apply-publish.mjs';
 import { build } from './build.mjs';
 import { inspectTarget } from './check.mjs';
 import { requireSuccess, run, sha256 } from './pakku.mjs';
+import { readReviewEvidence } from './review.mjs';
 import { createTargetComparison } from './review-target.mjs';
 import { readJson, safePath } from './workspace.mjs';
 
 const json = value => JSON.stringify(value, null, 2) + '\n';
 
-async function evidence(root, target) {
-  const current = await safePath(root, '.intake/current');
-  const [manifest, reviewBytes] = await Promise.all([
-    readJson(await safePath(current, 'manifest.json')),
-    fs.readFile(await safePath(current, 'review.json')),
-  ]).catch(error => {
-    if (error.code === 'ENOENT') throw new Error('请先运行 pnpm intake 和 pnpm review');
+export async function readProposalFeatures(root, scanId, target) {
+  let proposal;
+  try {
+    proposal = await readJson(await safePath(root, '.intake/current/proposal.json'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return { reason: '请将功能提案写入 .intake/current/proposal.json' };
+    if (error instanceof SyntaxError) throw new Error('.intake/current/proposal.json 不是有效的 JSON，请检查提案格式', { cause: error });
     throw error;
-  });
-  const review = JSON.parse(reviewBytes.toString('utf8'));
-  if (manifest.schema !== 1 || review.schema !== 1 || !manifest.scanId || manifest.scanId !== review.scanId ||
-      review.target?.id !== target.id || review.target.path !== target.path) {
-    throw new Error('当前采集与 Target 的审查不一致，请重新运行 pnpm review --target ' + target.id);
   }
-  return { manifest, review, reviewHash: sha256(reviewBytes), target };
+  if (proposal?.schema !== 1 || proposal.scanId !== scanId || proposal.target !== target.id) {
+    return { reason: '已有提案与本次采集或 Target 不符，请按当前审查更新 proposal.json' };
+  }
+  if (!Array.isArray(proposal.features) || !proposal.features.length) {
+    return { reason: '当前 proposal.json 缺少可选择的功能，请先补充提案' };
+  }
+  return { features: proposal.features };
 }
 
-function selectFeatures(proposal, requested, { manifest, target }) {
-  if (proposal.schema !== 1 || proposal.scanId !== manifest.scanId || proposal.target !== target.id ||
-      !Array.isArray(proposal.features)) throw new Error('proposal.json 须对应本次采集和选定 Target');
-  if (!requested?.length) throw new Error('请用 --feature <id> 选择本次准备的功能');
+function selectFeatures(available, requested) {
   return [...new Set(requested)].map(id => {
-    const matching = proposal.features.filter(feature => feature.id === id);
+    const matching = available.filter(feature => feature?.id === id);
     if (matching.length !== 1) throw new Error('提案中找不到唯一的功能 ID：' + id);
     const [feature] = matching;
     if (typeof feature.title !== 'string' || !feature.title.trim() || !Array.isArray(feature.operations) || !feature.operations.length) {
@@ -123,13 +122,18 @@ async function recordDiff(record, original, staged, operations, source) {
   return { changes, diffSha256: sha256(diff.stdout) };
 }
 
+export function requireFeatureIds(featureIds) {
+  if (!Array.isArray(featureIds) || !featureIds.length || featureIds.some(id => typeof id !== 'string' || !id.trim())) {
+    throw new Error('请用 --feature <id> 选择本次准备的功能');
+  }
+}
+
 export async function prepareSelection(root, target, featureIds) {
-  const context = await evidence(root, target);
-  const proposal = await readJson(await safePath(root, '.intake/current/proposal.json')).catch(error => {
-    if (error.code === 'ENOENT') throw new Error('请将功能提案写入 .intake/current/proposal.json');
-    throw error;
-  });
-  const features = selectFeatures(proposal, featureIds, context);
+  requireFeatureIds(featureIds);
+  const context = await readReviewEvidence(root, target);
+  const proposal = await readProposalFeatures(root, context.manifest.scanId, target);
+  if (!proposal.features) throw new Error(proposal.reason);
+  const features = selectFeatures(proposal.features, featureIds);
   const operations = selectedOperations(features);
   const original = await checkBaseline(root, context, operations);
   const dependencyOps = operations.filter(op => op.type === 'dependency');
@@ -148,7 +152,7 @@ export async function prepareSelection(root, target, featureIds) {
     const record = path.join(temp, 'record');
     await fs.mkdir(record);
     const { changes, diffSha256 } = await recordDiff(record, original, staged, operations, context.manifest.source);
-    const plan = { schema: 1, preparedAt: new Date().toISOString(), scanId: context.manifest.scanId, reviewHash: context.reviewHash,
+    const plan = { schema: 1, preparedAt: new Date().toISOString(), scanId: context.manifest.scanId, reviewHash: sha256(context.reviewBytes),
       target, features, dependencies, changes, diffSha256 };
     const bytes = json(plan), id = sha256(bytes);
     await fs.writeFile(path.join(record, 'plan.json'), bytes);
@@ -176,8 +180,8 @@ export async function applyPrepared(root, target, id) {
   if (sha256(await fs.readFile(await safePath(directory, 'changes.diff'))) !== plan.diffSha256) throw new Error('预览差异已变化，请重新准备');
   const operations = selectedOperations(plan.features);
   const verified = async () => {
-    const context = await evidence(root, target);
-    if (context.reviewHash !== plan.reviewHash || context.manifest.scanId !== plan.scanId) throw new Error('采集或审查已更换，请重新准备');
+    const context = await readReviewEvidence(root, target);
+    if (sha256(context.reviewBytes) !== plan.reviewHash || context.manifest.scanId !== plan.scanId) throw new Error('采集或审查已更换，请重新准备');
     await checkBaseline(root, context, operations);
     await verifySelectionSources(context.manifest, operations);
   };
@@ -190,6 +194,9 @@ export async function applyPrepared(root, target, id) {
     const { out } = await build(root, target);
     return { plan, alreadyApplied, out };
   } catch (error) {
-    throw new Error(`批准的文件已写入 ${target.path}，构建失败：${error.message}\n可用 pnpm build --target ${target.id} 重试。差异见 ${path.join(directory, 'changes.diff')}`);
+    const state = alreadyApplied ? `${target.path} 已包含批准的改动，重新构建失败` : `批准的文件已写入 ${target.path}，构建失败`;
+    const failure = new Error(`${state}：${error.message}\n可用 pnpm build --target ${target.id} 重试。差异见 ${path.join(directory, 'changes.diff')}`, { cause: error });
+    if (error.exitCode) failure.exitCode = error.exitCode;
+    throw failure;
   }
 }

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { scanInstance } from './intake-scan.mjs';
 import { safePath } from './workspace.mjs';
 
-const kinds = new Map([
+export const intakeKinds = new Map([
   ['mod', 'Mod JAR'], ['config', '配置'], ['kubejs', 'KubeJS'], ['script', 'CraftTweaker'],
   ['datapack', '数据包'], ['resourcepack', '资源包'], ['shaderpack', '光影'],
 ]);
@@ -31,7 +31,7 @@ function renderReport({ source, world, scannedAt, items, issues, stats }) {
   ];
   const counts = new Map();
   for (const item of items) counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1);
-  for (const [kind, label] of kinds) lines.push(`| ${label} | ${counts.get(kind) ?? 0} |`);
+  for (const [kind, label] of intakeKinds) lines.push(`| ${label} | ${counts.get(kind) ?? 0} |`);
   const mods = items.filter(item => item.kind === 'mod');
   if (mods.length) {
     const recognized = mods.filter(item => item.jar?.status === 'recognized').length;

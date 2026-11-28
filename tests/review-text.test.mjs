@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { sha256 } from '../tools/lib/pakku.mjs';
+import { readCurrentReview } from '../tools/lib/review.mjs';
 import { readReviewText } from '../tools/lib/review-text.mjs';
 
 async function fixture(t) {
@@ -47,6 +48,28 @@ test('单文件对照核对实例和侧别源文件的实际 SHA-256', async t =
   await assert.rejects(f.read, /SHA-256.*pnpm review/);
   await f.put(f.game, f.item.path, 'bonus = 4');
   await assert.rejects(f.read, /SHA-256.*pnpm intake/);
+});
+
+test('已有审查须匹配采集与 Target，缺失或损坏时仍能选择重新审查', async t => {
+  const f = await fixture(t);
+  const load = () => readCurrentReview(f.root, f.manifest, f.target);
+  await fs.unlink(path.join(f.current, 'review.json'));
+  assert.deepEqual(await load(), {});
+  await f.put(f.current, 'review.json', '{');
+  assert.match((await load()).reason, /review.json.*JSON.*pnpm review/);
+  f.review.conflicts = [];
+  f.review.scanId = 'earlier';
+  await f.save();
+  assert.match((await load()).reason, /采集与审查/);
+  f.review.scanId = f.manifest.scanId;
+  f.review.target = { ...f.target, path: 'packs/other' };
+  await f.save();
+  assert.match((await load()).reason, /其他 Target/);
+  f.review.target = f.target;
+  await f.save();
+  const result = await load();
+  assert.deepEqual(result.review, f.review);
+  assert.equal(result.bytes.toString('utf8'), JSON.stringify(f.review));
 });
 
 test('复用其他路径的同内容快照，保留离线或已移动实例的审阅能力', async t => {

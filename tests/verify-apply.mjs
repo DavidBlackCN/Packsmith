@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { unzipSync } from 'fflate';
+import { reviewFromMenu } from '../tools/menu-review.mjs';
 
 // The approved feature retires one locked dependency and adds only its replacement recipe.
 export async function verifyApprovedFeature(root, target, other) {
@@ -63,17 +64,39 @@ export async function verifyApprovedFeature(root, target, other) {
   assert.throws(() => applying('--target', target.id), /变化|重新采集|哈希|SHA/);
   assert.deepEqual(status(), []);
   await put(game + '/' + recipe, code);
+  const menu = [];
+  await reviewFromMenu(root, target, {
+    write: line => menu.push(line),
+    choose: (_, choices) => {
+      assert.match(choices[0], /使用已有审查/);
+      return 0;
+    },
+    chooseMany: (_, labels) => {
+      const index = labels.findIndex(label => label.includes('[recipe]'));
+      assert.notEqual(index, -1);
+      return [index];
+    },
+    async confirm() {
+      const menuId = /预览编号：([a-f0-9]{64})/.exec(menu.join('\n'))?.[1];
+      assert.ok(menuId);
+      assert.equal(await fs.readFile(path.join(root, '.work/prepared', menuId, 'changes.diff'), 'utf8'), diff);
+      return true;
+    },
+  }, () => true);
+  assert.ok(menu.some(line => line.includes('已写入，检查与构建通过')));
   const output = applying('--target', target.id);
-  assert.match(output, /检查与构建通过/);
+  assert.match(output, /重新检查与构建通过/);
   assert.deepEqual(status(), [lockPath, target.path + '/' + destination].sort());
   assert.equal((await read(lockPath)).projects?.length ?? 0, 0);
-  const out = /产物：(.+)/.exec(output)[1].trim();
-  for (const name of await fs.readdir(out)) {
-    if (!/\.(mrpack|zip)$/.test(name)) continue;
-    const archive = unzipSync(await fs.readFile(path.join(out, name)));
-    const prefix = name.endsWith('.mrpack') ? 'overrides/' : '';
-    assert.equal(Buffer.from(archive[prefix + recipe]).toString('utf8'), code);
-    assert.ok(!archive[prefix + visual]);
+  for (const transcript of [menu.join('\n'), output]) {
+    const out = /产物：(.+)/.exec(transcript)[1].trim();
+    for (const name of await fs.readdir(out)) {
+      if (!/\.(mrpack|zip)$/.test(name)) continue;
+      const archive = unzipSync(await fs.readFile(path.join(out, name)));
+      const prefix = name.endsWith('.mrpack') ? 'overrides/' : '';
+      assert.equal(Buffer.from(archive[prefix + recipe]).toString('utf8'), code);
+      assert.ok(!archive[prefix + visual]);
+    }
   }
-  console.log('两个功能仅写入所选配方及批准移除的依赖，验证了 Git 差异、过期候选拦截和实际产物。');
+  console.log('菜单与 CLI 预览差异一致。部分批准、过期候选拦截和两次构建的实际产物均通过验证。');
 }

@@ -3,7 +3,8 @@ import path from 'node:path';
 import { managedPath, portablePath, publicContent } from './content-policy.mjs';
 import { maxTextSize, textExtension, withStableFile } from './intake-scan.mjs';
 import { sha256 } from './pakku.mjs';
-import { readJson, safePath } from './workspace.mjs';
+import { readReviewEvidence } from './review.mjs';
+import { safePath } from './workspace.mjs';
 
 function validateTextCandidate(item, world) {
   const name = portablePath(item.path);
@@ -51,18 +52,7 @@ const sideDirectories = { common: 'overrides', client: 'client-overrides', serve
 export async function readReviewText(root, target, relative) {
   portablePath(relative);
   const current = await safePath(root, '.intake/current');
-  let manifest, review;
-  try {
-    [manifest, review] = await Promise.all([
-      readJson(await safePath(current, 'manifest.json')), readJson(await safePath(current, 'review.json')),
-    ]);
-  } catch (error) {
-    if (error.code === 'ENOENT') throw new Error('缺少采集清单或目标审查，请先运行 pnpm intake 和 pnpm review');
-    throw error;
-  }
-  if (manifest.schema !== 1 || review.schema !== 1 || !manifest.scanId || manifest.scanId !== review.scanId ||
-      !Array.isArray(manifest.items) || !Array.isArray(review.items)) throw new Error('采集与审查记录不一致，请重新运行 pnpm review');
-  if (review.target?.id !== target.id || review.target.path !== target.path) throw new Error('当前审查属于其他 Target，请重新运行 pnpm review --target ' + target.id);
+  const { manifest, review } = await readReviewEvidence(root, target);
   const item = manifest.items.find(entry => entry.path === relative);
   const reviewed = review.items.find(entry => entry.path === relative);
   if (!item || !reviewed) throw new Error('此路径不在当前采集与审查清单中：' + relative);
