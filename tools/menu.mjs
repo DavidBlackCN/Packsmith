@@ -2,9 +2,11 @@ import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import pkg from '../package.json' with { type: 'json' };
 import { bootstrap, requireSuccess, run, tool, verifiedTool } from './lib/pakku.mjs';
 import { loadWorkspace, readJson, selectTarget } from './lib/workspace.mjs';
-import { field, isCI, multiline, terminal } from './lib/terminal.mjs';
+import { isCI, multiline, terminal } from './lib/terminal.mjs';
+import { homeActions } from './menu-home.mjs';
 import { createMenuUi, MenuCancelled } from './menu-ui.mjs';
 
 async function mp(root, args) {
@@ -95,14 +97,12 @@ export async function runMenu(root, ui) {
   }
 
   for (;;) {
-    const labels = ['从实例采集', '审查与应用', '检查与构建', '提交已暂存的改动'];
-    const details = ['扫描游戏目录，记录候选文件', '对照候选，预览并确认选中的功能',
-      '校验 Target 或导出整合包', '使用 czg 提交 Git 暂存区'];
-    if (multiple) {
-      labels.push('切换 Target');
-      details.push('选择本次审查或构建的整合包');
-    }
-    const choice = await ui.choose(`Packsmith · ${field(path.basename(root))} · Target：${current?.id ?? '待选择'}`, labels, '退出', details);
+    const actions = multiple ? homeActions : homeActions.slice(0, 4);
+    const labels = actions.map(action => action.label);
+    const details = actions.map(action => action.detail);
+    const choice = await ui.choose('Packsmith', labels, '退出', details, {
+      workspace: path.basename(root), version: pkg.version, target: current?.id ?? '待选择',
+    });
     if (choice === null) return;
     try {
       if (choice === 0) {

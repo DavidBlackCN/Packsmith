@@ -1,5 +1,7 @@
+import { clearScreenDown, cursorTo, moveCursor } from 'node:readline';
 import { createInterface } from 'node:readline/promises';
 import { field, multiline, terminal } from './lib/terminal.mjs';
+import { renderHome } from './menu-home.mjs';
 
 export class MenuCancelled extends Error {
   constructor() {
@@ -29,29 +31,62 @@ export function createMenuUi({ input = process.stdin, output = process.stdout, s
     return session;
   }
 
-  async function question(prompt, onKey) {
+  async function question(prompt, onKey, redraw) {
     const { reader, signal } = current();
     const back = new AbortController();
+    let cursorRows = 0;
     function keypress(ch, key) {
       if (key.name === 'escape') back.abort();
       else onKey?.(reader, key);
+      if (redraw) cursorRows = reader.getCursorPos().rows;
+    }
+    function resize() {
+      // VT reflows the old frame before Node receives resize. readline will
+      // move up by the old row count; account for rows gained or lost to wrapping.
+      const reflowedRows = reader.getCursorPos().rows;
+      if (cursorRows !== reflowedRows) moveCursor(output, 0, cursorRows - reflowedRows);
+      reader.setPrompt(redraw());
+      cursorRows = reader.getCursorPos().rows;
+    }
+    let completedRows = 0;
+    function measureFrame(ch, key) {
+      if (key.name === 'return' || key.name === 'enter' || key.name === 'escape' || (key.ctrl && key.name === 'c')) {
+        // readline finishes the question by moving to the end and writing CRLF.
+        reader.write(null, { ctrl: true, name: 'e' });
+        completedRows = reader.getCursorPos().rows + 1;
+      }
+    }
+    if (redraw) {
+      output.prependListener('resize', resize);
+      input.prependListener('keypress', measureFrame);
     }
     if (keyboard) input.on('keypress', keypress);
     try {
-      return (await reader.question(prompt, { signal: AbortSignal.any([signal, back.signal]) })).trim();
+      const answer = reader.question(prompt, { signal: AbortSignal.any([signal, back.signal]) });
+      if (redraw) cursorRows = reader.getCursorPos().rows;
+      return (await answer).trim();
     } catch (error) {
       if (signal.aborted) throw new MenuCancelled();
       if (back.signal.aborted) return null;
       throw error;
     } finally {
       if (keyboard) input.off('keypress', keypress);
+      if (redraw) {
+        output.off('resize', resize);
+        input.off('keypress', measureFrame);
+        if (completedRows) {
+          moveCursor(output, 0, -completedRows);
+          cursorTo(output, 0);
+          clearScreenDown(output);
+        }
+      }
     }
   }
 
   const ask = async text => (await question(field(text) + (keyboard ? ' [Esc 返回] ' : ' '))) ?? '';
 
-  async function select(title, labels, multiple, backLabel, descriptions = []) {
-    write(style.heading(field(title)));
+  async function select(title, labels, multiple, backLabel, descriptions = [], home) {
+    if (!home) write(style.heading(field(title)));
     if (!labels.length) {
       write('暂无可选项。');
       return null;
@@ -62,7 +97,14 @@ export function createMenuUi({ input = process.stdin, output = process.stdout, s
     let view = options, cursor = 0, filter = '';
     const checked = new Set();
     const labelFor = option => `${option.index + 1}. ${option.text}${option.detail ? '  ' + option.detail : ''}`;
+    function homeFrame() {
+      return renderHome({
+        ...home, options: view, active: cursor, filter, columns: output.columns ?? 80,
+        rows: output.rows ?? 24, ascii: !keyboard, color: keyboard && env.NO_COLOR === undefined,
+      });
+    }
     function render() {
+      if (home) return homeFrame() + '\n  › ';
       const size = Math.max(1, Math.min(8, (output.rows ?? 24) - 6));
       const start = Math.max(0, Math.min(cursor - Math.floor(size / 2), view.length - size));
       const lines = view.slice(start, start + size).map((option, row) => {
@@ -93,15 +135,17 @@ export function createMenuUi({ input = process.stdin, output = process.stdout, s
       reader.setPrompt(render());
       reader.prompt(true);
     }
-    if (keyboard) {
+    if (home && !keyboard) {
+      write(homeFrame());
+    } else if (keyboard && !home) {
       write('↑↓ 移动 · Enter 确定 · Esc ' + backLabel + ' · Ctrl+C 退出');
       write((multiple ? '空格勾选，也可输入多个编号' : '也可输入编号') + ' · /关键词 + Enter 筛选 · 0 ' + backLabel);
-    } else {
+    } else if (!keyboard) {
       options.forEach(option => write('  ' + labelFor(option)));
       write(`  0. ${backLabel}`);
     }
     while (true) {
-      const answer = keyboard ? await question(render(), navigate) :
+      const answer = keyboard ? await question(render(), navigate, home && render) :
         await question(multiple ? '请输入编号，多个编号用逗号或空格分隔： ' : '请输入编号： ');
       if (answer === null || answer === '0') return null;
       if (keyboard && answer.startsWith('/')) {
@@ -129,7 +173,7 @@ export function createMenuUi({ input = process.stdin, output = process.stdout, s
 
   return {
     ask, write, error,
-    choose: (title, labels, backLabel = '返回', descriptions) => select(title, labels, false, backLabel, descriptions),
+    choose: (title, labels, backLabel = '返回', descriptions, home) => select(title, labels, false, backLabel, descriptions, home),
     chooseMany: (title, labels) => select(title, labels, true, '返回'),
     async confirm(text) {
       const answer = await question(field(text) + (keyboard ? ' [y/是/N，默认否；0/Esc 返回] ' : ' [y/是/N，默认否；0 返回] '));

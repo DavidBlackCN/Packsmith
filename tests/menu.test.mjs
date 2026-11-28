@@ -16,10 +16,15 @@ test('多 Target 菜单记住当前选择，取消切换后仍使用原目标', 
   await fs.writeFile(path.join(root, 'workspace.json'), JSON.stringify({ targets }));
 
   const prompts = [];
+  const homeTargets = [];
   const actions = ['检查与构建', 'neo', null, '切换 Target', null, '检查与构建', null, '切换 Target', 'fabric', null];
   await runMenu(root, {
-    choose(title, labels) {
+    choose(title, labels, back, details, home) {
       prompts.push(title);
+      if (home) {
+        assert.equal(home.workspace, path.basename(root));
+        homeTargets.push(home.target);
+      }
       assert.ok(actions.length);
       const action = actions.shift();
       if (action === null) return null;
@@ -31,7 +36,8 @@ test('多 Target 菜单记住当前选择，取消切换后仍使用原目标', 
   });
   assert.deepEqual(actions, []);
   assert.deepEqual(prompts.filter(title => title.startsWith('检查与构建')), ['检查与构建 · neo', '检查与构建 · neo']);
-  assert.match(prompts.at(-1), /Target：fabric/);
+  assert.equal(homeTargets[0], '待选择');
+  assert.equal(homeTargets.at(-1), 'fabric');
 });
 
 test('离线审查只预览勾选项，拒绝应用保留原文件，也不会要求安装 Pakku', async t => {

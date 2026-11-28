@@ -20,6 +20,8 @@ pnpm build
 
 在仓库根目录运行 `pnpm install --frozen-lockfile`，然后用 `pnpm menu` 打开中文菜单。Windows、macOS 和 Linux 使用同一个入口。`pnpm mp` 或 `pnpm mp --help` 可以随时查看直接命令。
 
+主菜单顶栏显示版本、工作区和当前 Target。移动焦点时可以看到这一步会读取或写入什么。窄窗口会把说明移到选中项下方。[宽屏实拍](docs/images/packsmith-menu-windows.png) · [窄屏实拍](docs/images/packsmith-menu-windows-narrow.png)
+
 用 ↑、↓ 移动，Enter 选择。在功能列表中按空格勾选，输入 `/关键词` 再按 Enter 可筛选，单独输入 `/` 并回车可清除筛选。也可以直接输入编号，多选时用逗号或空格分隔。
 
 在选项和确认提示里，`0` 或 Esc 返回；在主菜单则退出。输入路径时可留空返回。写入确认默认选“否”，直接回车即可放弃这次写入。Ctrl+C 退出菜单。`TERM=dumb` 下使用编号和回车。
